@@ -11,7 +11,7 @@
 
 #sleep 100
 module load gurobi/9.0.0-nsc1
-module load Python/3.10.4-env-hpc1-gcc-2022a-eb
+module load Python/3.10.4-bare-hpc1-gcc-2022a-eb
 source venv/bin/activate
 
 mkdir results/stockholm_large_const_uncert_"$1"
