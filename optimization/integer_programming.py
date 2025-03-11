@@ -85,7 +85,7 @@ def ip_optimization(nodes: dict, edges: dict, intents: dict, time_steps: range, 
         lambda x: edges_list + [(intents[drones_list[x]].source.name, intents[drones_list[x]].source.name)]
 
     # ---- Model definition ----
-    model = mip.Model(name="balance", sense=mip.MINIMIZE, solver_name=mip.GUROBI)
+    model = mip.Model(name="balance", sense=mip.MINIMIZE, solver_name=mip.CBC)
 
     # ---- Decision variables ----
     # whether drone `d` traverses edge `e` starting at time step `t`
@@ -218,6 +218,11 @@ def ip_optimization(nodes: dict, edges: dict, intents: dict, time_steps: range, 
     # ---- Output ----
     if model.num_solutions:
         print("DID WE GET HERE??", flush=True)
+        drones_arrival_x = [[[arrival_var.x for arrival_var in drone] for drone in edge] for edge in drones_arrival]
+        drones_departure_x = [[[departure_var.x for departure_var in drone] for drone in edge] for edge in drones_departure]
+        vertiport_reserved_x = [[[vertiport_var.x for vertiport_var in t] for t in drone] for drone in vertiport_reserved]
+        import pickle
+        pickle.dump((drones_arrival_x, drones_departure_x, vertiport_reserved_x), open("drones_arrival_x.pkl", "wb"))
         ip_obj = model.objective_value
 
         # build the path of each drone
