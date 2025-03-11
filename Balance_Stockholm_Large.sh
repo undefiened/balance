@@ -4,7 +4,9 @@
 #SBATCH --mem=300000
 #SBATCH --exclusive
 #SBATCH -N 1
-#SBATCH --mail-user=hardy.hasan@liu.se
+#SBATCH --mail-user=leonid.sedov@liu.se
+#SBATCH -o Balance_Stockholm_Large.out
+#SBATCH -e Balance_Stockholm_Large.err
 #SBATCH --mail-type=ALL
 
 #sleep 100
