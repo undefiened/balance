@@ -78,7 +78,7 @@ def ip_optimization(nodes: dict, edges: dict, intents: dict, time_steps: range, 
     edge_weights_td = [math.ceil(edge.weight / time_delta) * time_delta for edge in edges.values()] + [time_delta]
     
     largest_edge_weight = max(edge_weights_td)
-    arrival_time_steps_ids = range(len(time_steps) + 2*largest_edge_weight)
+    arrival_time_steps_ids = range(len(time_steps) + 4*(largest_edge_weight//time_delta))
 
     # function that takes a drone d's id, and returns the edges_list with the edge (d.source, d.source) added to it
     extend_edges_list: Callable[[int], list[tuple[str, str]]] = \
@@ -187,22 +187,25 @@ def ip_optimization(nodes: dict, edges: dict, intents: dict, time_steps: range, 
 
     # 6. The value of the decision variable for arrival of an edge must equal
     #    the value of the decision variable of departure time for that edge.
-    # for e in edges_ids:
-    #     edge_weight = edge_weights_td[e]
-    #     for d in drones_ids:
-    #         for t in time_steps_ids:
-    #             w = t - (edge_weight // time_delta)
-    #             if w >= 0:
-    #                 model.add_constr(drones_arrival[e][d][t] == drones_departure[e][d][w],
-    #                                  "Drone arrival and departure times differs by edge weight.")
-                    
     for e in edges_ids:
         edge_weight = edge_weights_td[e]
         for d in drones_ids:
             for t in time_steps_ids:
-                arr_t = t + (edge_weight // time_delta)
-                model.add_constr(drones_arrival[e][d][arr_t] == drones_departure[e][d][t],
+                w = t - (edge_weight // time_delta)
+                if w >= 0:
+                    model.add_constr(drones_arrival[e][d][t] == drones_departure[e][d][w],
                                      "Drone arrival and departure times differs by edge weight.")
+                else:
+                    model.add_constr(drones_arrival[e][d][t] == 0,
+                                     "Impossible arrival")
+                    
+    # for e in edges_ids:
+    #     edge_weight = edge_weights_td[e]
+    #     for d in drones_ids:
+    #         for t in time_steps_ids:
+    #             arr_t = t + (edge_weight // time_delta)
+    #             model.add_constr(drones_arrival[e][d][arr_t] == drones_departure[e][d][t],
+    #                                  "Drone arrival and departure times differs by edge weight.")
 
 
     # ---- Objective ----
