@@ -588,7 +588,7 @@ def main(path: str, verbose: bool, intents_lst: List = None, analysis_obj: Resul
     # --- Read data and create variables ---
     start, time_horizon, time_delta, speed, nodes, edges,  intents = read_example(path=path, intents=intents_lst)
     nodes_dict, edges_dict, intents_dict = create_dicts(nodes, edges, intents, time_horizon, time_delta, speed)
-    time_steps = range(start, 2*(time_horizon + 1), time_delta)
+    time_steps = range(start, 3*(time_horizon + 1), time_delta)
 
     # --- Solve IP ---
     ip_start = time.perf_counter()
