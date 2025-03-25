@@ -22,7 +22,7 @@ import numpy as np
 import pandas as pd
 
 import checks
-from constants import TIME_HORIZON_MULTIPLIER
+from constants import GREEDY_TIME_HORIZON_MULTIPLIER, IP_TIME_HORIZON_MULTIPLIER
 import graph
 import intent
 import optimization
@@ -588,9 +588,8 @@ def main(path: str, verbose: bool, intents_lst: List = None, analysis_obj: Resul
     """
     # --- Read data and create variables ---
     start, time_horizon, time_delta, speed, nodes, edges,  intents = read_example(path=path, intents=intents_lst)
-    nodes_dict, edges_dict, intents_dict = create_dicts(nodes, edges, intents, time_horizon, time_delta, speed)
-    time_horizon = time_horizon * TIME_HORIZON_MULTIPLIER
-    time_steps = range(start, (time_horizon + 1), time_delta)
+    nodes_dict, edges_dict, intents_dict = create_dicts(nodes, edges, intents, max(GREEDY_TIME_HORIZON_MULTIPLIER, IP_TIME_HORIZON_MULTIPLIER)*time_horizon, time_delta, speed)
+    time_steps = range(start, (IP_TIME_HORIZON_MULTIPLIER*time_horizon + 1), time_delta)
 
     # --- Solve IP ---
     ip_start = time.perf_counter()
@@ -613,7 +612,7 @@ def main(path: str, verbose: bool, intents_lst: List = None, analysis_obj: Resul
     # --- Check correctness of solutions ---
     print(f"\n\ngreedy={greedy_obj}, ip_obj={ip_obj}\n\n", flush=True)
     greedy_valid_solution, ip_valid_solution = (
-        checks.sanity_check(intents_dict, nodes_dict, edges_dict, time_delta, time_horizon))
+        checks.sanity_check(intents_dict, nodes_dict, edges_dict, time_delta, max(GREEDY_TIME_HORIZON_MULTIPLIER, IP_TIME_HORIZON_MULTIPLIER)*time_horizon))
     print(f"greedy_valid_solution={greedy_valid_solution}\nip_valid_solution={ip_valid_solution}", flush=True)
 
     if verbose:
