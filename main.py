@@ -259,6 +259,13 @@ def create_dicts(nodes: List[Dict], edges: List[Dict], intents: List[Dict], time
             graph.Edge(nodes_dict[e["source"]], nodes_dict[e["destination"]], math.ceil(e["weight"]/speed))
         for e in edges
     }
+
+    # Add reverse edges
+    edges_dict.update({
+        (e["destination"], e["source"]): graph.Edge(nodes_dict[e["destination"]], nodes_dict[e["source"]], math.ceil(e["weight"] / speed))
+        for e in edges
+    })
+
     intents_dict = {
         (i["source"], i["destination"], i["start"]):
             intent.Intent(nodes_dict[i["source"]], nodes_dict[i["destination"]], i["start"], i["uncertainty"])
