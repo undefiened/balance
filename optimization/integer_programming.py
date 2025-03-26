@@ -27,12 +27,16 @@ The objective of the model is to find the shortest total time of operation for a
 """
 
 import math
-from typing import Union, Callable
+from typing import List, Union, Callable
 
 import mip
 
 import constants
 import utils
+
+
+def get_drone_timesteps(d: int, earliest_departure_times: List[int], time_delta:int, time_steps: range) -> range:
+    return range(earliest_departure_times[d] // time_delta, len(time_steps))
 
 
 def ip_optimization(nodes: dict, edges: dict, intents: dict, time_steps: range, time_delta: int) -> Union[float, None]:
@@ -120,7 +124,7 @@ def ip_optimization(nodes: dict, edges: dict, intents: dict, time_steps: range, 
             incoming_edges = [e for e in edges_ids if edges_list_extended[e][1] == k_name]
             outgoing_edges = [e for e in edges_ids if edges_list_extended[e][0] == k_name]
             msg = f"Fcc__D{d}__{k_name} " # flow conservation constraint
-            for t in time_steps_ids:
+            for t in get_drone_timesteps(d, earliest_departure_times, time_delta, time_steps):
                 # case 1: where `k` is the origin vertiport and `t` is departure time:
                 if k_name == src and (t * time_delta) == dept_time:
                     model.add_constr(mip.xsum(drones_arrival[e][d][t] for e in incoming_edges)
@@ -148,8 +152,8 @@ def ip_optimization(nodes: dict, edges: dict, intents: dict, time_steps: range, 
             weight_uncertainty = [
                 math.ceil((edge_weights[idx] + U * int(idx < len(edges))) / time_delta) for idx in valid_edges
             ]
-            for t in time_steps_ids[:-1]:
-                T = time_steps_ids[-1]
+            for t in get_drone_timesteps(d, earliest_departure_times, time_delta, time_steps)[:-1]:
+                T = get_drone_timesteps(d, earliest_departure_times, time_delta, time_steps)[-1]
                 time_ranges = [range(max(0, t - weight_uncertainty[idx] + 1), min(t, T) + 1)
                                for idx, _ in enumerate(valid_edges)]
                 model.add_constr(
@@ -182,7 +186,7 @@ def ip_optimization(nodes: dict, edges: dict, intents: dict, time_steps: range, 
         edges_list_extended = extend_edges_list(d)
         dest = destination_vertiports_names[d]
         valid_edges = [idx for idx in edges_ids if edges_list_extended[idx][1] == dest]
-        model.add_constr(mip.xsum(drones_departure[e][d][t] for t in time_steps_ids[:-1] for e in valid_edges) == 1,
+        model.add_constr(mip.xsum(drones_departure[e][d][t] for t in get_drone_timesteps(d, earliest_departure_times, time_delta, time_steps)[:-1] for e in valid_edges) == 1,
                          "Ac") #Arrival constraint
 
     # 6. The value of the decision variable for arrival of an edge must equal
@@ -190,7 +194,7 @@ def ip_optimization(nodes: dict, edges: dict, intents: dict, time_steps: range, 
     for e in edges_ids:
         edge_weight = edge_weights_td[e]
         for d in drones_ids:
-            for t in time_steps_ids:
+            for t in get_drone_timesteps(d, earliest_departure_times, time_delta, time_steps):
                 w = t - (edge_weight // time_delta)
                 if w >= 0:
                     model.add_constr(drones_arrival[e][d][t] == drones_departure[e][d][w],
@@ -198,7 +202,18 @@ def ip_optimization(nodes: dict, edges: dict, intents: dict, time_steps: range, 
                 else:
                     model.add_constr(drones_arrival[e][d][t] == 0,
                                      "Ia") # Impossible arrival
-                    
+    
+    for e in edges_ids:
+        for d in drones_ids:
+            for t in range(math.floor(earliest_departure_times[d]//time_delta)-1):
+                model.add_constr(drones_arrival[e][d][t] == 0) 
+                model.add_constr(drones_departure[e][d][t] == 0)
+    
+    for v in vertiports_ids:
+        for d in drones_ids:
+            for t in range(math.floor(earliest_departure_times[d]//time_delta)-1):
+                model.add_constr(vertiport_reserved[v][d][t] == 0)
+
     # for e in edges_ids:
     #     edge_weight = edge_weights_td[e]
     #     for d in drones_ids:
@@ -220,12 +235,12 @@ def ip_optimization(nodes: dict, edges: dict, intents: dict, time_steps: range, 
 
     # ---- Output ----
     if model.num_solutions:
-        print("DID WE GET HERE??", flush=True)
+        # print("DID WE GET HERE??", flush=True)
         drones_arrival_x = [[[arrival_var.x for arrival_var in drone] for drone in edge] for edge in drones_arrival]
         drones_departure_x = [[[departure_var.x for departure_var in drone] for drone in edge] for edge in drones_departure]
         vertiport_reserved_x = [[[vertiport_var.x for vertiport_var in t] for t in drone] for drone in vertiport_reserved]
         import pickle
-        pickle.dump((drones_arrival_x, drones_departure_x, vertiport_reserved_x), open("drones_arrival_x.pkl", "wb"))
+        pickle.dump((drones_arrival_x, drones_departure_x, vertiport_reserved_x), open("results/drones_arrival_x_{len(intents)}.pkl", "wb"))
         ip_obj = model.objective_value
 
         # build the path of each drone
