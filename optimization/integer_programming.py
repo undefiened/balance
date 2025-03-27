@@ -203,11 +203,11 @@ def ip_optimization(nodes: dict, edges: dict, intents: dict, time_steps: range, 
                     model.add_constr(drones_arrival[e][d][t] == 0,
                                      "Ia") # Impossible arrival
     
-    # for e in edges_ids:
-    #     for d in drones_ids:
-    #         for t in range(math.floor(earliest_departure_times[d]//time_delta)-1):
-    #             model.add_constr(drones_arrival[e][d][t] == 0) 
-    #             model.add_constr(drones_departure[e][d][t] == 0)
+    for e in edges_ids:
+        for d in drones_ids:
+            for t in range(math.floor(earliest_departure_times[d]//time_delta)-1):
+                model.add_constr(drones_arrival[e][d][t] == 0) 
+                model.add_constr(drones_departure[e][d][t] == 0)
     
     # for v in vertiports_ids:
     #     for d in drones_ids:
