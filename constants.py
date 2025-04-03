@@ -12,4 +12,7 @@ ALLOWED_GAP = 0.05
 IP_TIME_HORIZON_MULTIPLIER = 3
 GREEDY_TIME_HORIZON_MULTIPLIER = 6
 
+USE_WARM_UP_SOLUTION_FOR_IP = True
+SORT_INTENTS_BY_DEPARTURE_TIME = False
+
 # =============================================== END OF FILE ===============================================

@@ -22,7 +22,7 @@ import numpy as np
 import pandas as pd
 
 import checks
-from constants import GREEDY_TIME_HORIZON_MULTIPLIER, IP_TIME_HORIZON_MULTIPLIER
+from constants import GREEDY_TIME_HORIZON_MULTIPLIER, IP_TIME_HORIZON_MULTIPLIER, SORT_INTENTS_BY_DEPARTURE_TIME
 import graph
 import intent
 import optimization
@@ -222,6 +222,9 @@ def read_example(path: str, intents=None) \
                    and isinstance(op_intent['uncertainty'], int) and op_intent['uncertainty'] >= 0, (
                 f"{op_intent}: Either syntax error in names, start time being non integer, it starts before "
                 f"operations start time or time uncertainty is negative/non-integer.")
+
+        if SORT_INTENTS_BY_DEPARTURE_TIME:
+            intents_list.sort(key=lambda x: x['start'])
 
         return start, time_horizon, time_delta, speed, nodes, edges, intents_list
 
@@ -598,15 +601,6 @@ def main(path: str, verbose: bool, intents_lst: List = None, analysis_obj: Resul
     nodes_dict, edges_dict, intents_dict = create_dicts(nodes, edges, intents, max(GREEDY_TIME_HORIZON_MULTIPLIER, IP_TIME_HORIZON_MULTIPLIER)*time_horizon, time_delta, speed)
     time_steps = range(start, (IP_TIME_HORIZON_MULTIPLIER*time_horizon + 1), time_delta)
 
-    # --- Solve IP ---
-    ip_start = time.perf_counter()
-    tracemalloc.start()
-    ip_obj, ip_model = solve_ip(nodes_dict, edges_dict, intents_dict, time_steps, time_delta)
-    ip_end = time.perf_counter()
-    ip_runtime = (ip_end - ip_start)
-    _, ip_memory = tracemalloc.get_traced_memory()
-    tracemalloc.stop()
-
     # --- Solve Greedy ---
     greedy_start = time.perf_counter()
     tracemalloc.start()
@@ -614,6 +608,15 @@ def main(path: str, verbose: bool, intents_lst: List = None, analysis_obj: Resul
     greedy_end = time.perf_counter()
     greedy_runtime = (greedy_end - greedy_start)
     _, greedy_memory = tracemalloc.get_traced_memory()
+    tracemalloc.stop()
+
+    # --- Solve IP ---
+    ip_start = time.perf_counter()
+    tracemalloc.start()
+    ip_obj, ip_model = solve_ip(nodes_dict, edges_dict, intents_dict, time_steps, time_delta)
+    ip_end = time.perf_counter()
+    ip_runtime = (ip_end - ip_start)
+    _, ip_memory = tracemalloc.get_traced_memory()
     tracemalloc.stop()
 
     # --- Check correctness of solutions ---

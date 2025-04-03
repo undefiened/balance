@@ -27,7 +27,7 @@ The objective of the model is to find the shortest total time of operation for a
 """
 
 import math
-from typing import List, Union, Callable
+from typing import List, Tuple, Union, Callable
 
 import mip
 
@@ -38,6 +38,90 @@ import utils
 def get_drone_timesteps(d: int, earliest_departure_times: List[int], time_delta:int, time_steps: range) -> range:
     return range(earliest_departure_times[d] // time_delta, len(time_steps))
 
+
+def generate_warm_up_ip_solution_from_greedy(intents: dict, edges_list: list, time_steps_ids: range, 
+                                             arrival_time_steps_ids: range, time_delta: int, 
+                                             edge_weights_td: list, vertiports_list: list, 
+                                             drones_departure: list, drones_arrival: list, 
+                                             vertiport_reserved: list, extend_edges_list: Callable) -> List[Tuple[object, int]]:
+    """
+    Use greedy solutions to warm start the MIP solver.
+
+    Parameters
+    ----------
+    intents: dict
+        Dictionary of the operational intents to be scheduled and their names.
+    edges_list: list
+        List of all valid edges plus extra edges indicating ground delay.
+    time_steps_ids: range
+        A range object for the discretized time steps.
+    arrival_time_steps_ids: range
+        A range object for the arrival time steps.
+    time_delta: int
+        Time discretization step.
+    edge_weights_td: list
+        Edge weights in terms of time delta.
+    vertiports_list: list
+        List of all vertiports.
+    drones_departure: list
+        Decision variables for drone departures.
+    drones_arrival: list
+        Decision variables for drone arrivals.
+    vertiport_reserved: list
+        Decision variables for vertiport reservations.
+    extend_edges_list: Callable
+        Function to extend the edges list for a specific drone.
+    """
+    initial_values = []
+
+    for d, intent in enumerate(intents.values()):
+        if hasattr(intent, 'greedy_solution_found') and intent.greedy_solution_found:
+            edges_list_extended = extend_edges_list(d)
+            
+            # Process each edge in the greedy path
+            for i in range(len(intent.path_greedy) - 1):
+                current_node = intent.path_greedy[i]
+                next_node = intent.path_greedy[i + 1]
+                
+                # Get edge index
+                edge_tuple = (current_node.name, next_node.name)
+                if edge_tuple in edges_list:
+                    e = edges_list.index(edge_tuple)
+                elif current_node.name == next_node.name:
+                    # This is a ground delay - last edge in extended edges_list
+                    e = len(edges_list)
+                else:
+                    continue
+                
+                # Get departure time step
+                departure_time = int(current_node.layer)
+                if departure_time < len(time_steps_ids):
+                    # Set departure variable
+                    initial_values.append((drones_departure[e][d][departure_time], 1))
+                    
+                    # Calculate arrival time based on edge weight
+                    edge_td = edge_weights_td[e] // time_delta
+                    arrival_time = departure_time + edge_td
+                    if arrival_time < len(arrival_time_steps_ids):
+                        initial_values.append((drones_arrival[e][d][arrival_time], 1))
+                    
+                    # Set vertiport reservation for destination node
+                    if next_node.name in vertiports_list:
+                        v_idx = vertiports_list.index(next_node.name)
+                        # Reserve from arrival time
+                        if arrival_time < len(time_steps_ids):
+                            initial_values.append((vertiport_reserved[v_idx][d][arrival_time], 1))
+                        
+                        # If next_node has reservation info, use it
+                        if hasattr(next_node, 'left_reserved_layer') and hasattr(next_node, 'right_reserved_layer'):
+                            left_layer = int(next_node.left_reserved_layer)
+                            right_layer = int(next_node.right_reserved_layer)
+                            
+                            # Set reservation for the known duration
+                            for t in range(max(0, left_layer), min(right_layer + 1, len(time_steps_ids))):
+                                initial_values.append((vertiport_reserved[v_idx][d][t], 1))
+
+    return initial_values
 
 def ip_optimization(nodes: dict, edges: dict, intents: dict, time_steps: range, time_delta: int) -> Union[float, None]:
     """
@@ -229,6 +313,14 @@ def ip_optimization(nodes: dict, edges: dict, intents: dict, time_steps: range, 
                                 for e in edges_ids for d in drones_ids for t in time_steps_ids)
                        + mip.xsum(vertiport_reserved[v][d][t]
                                   for t in time_steps_ids for d in drones_ids for v in vertiports_ids) / 9999999)
+
+    if constants.USE_WARM_UP_SOLUTION_FOR_IP:
+        initial_values = generate_warm_up_ip_solution_from_greedy(intents, edges_list, time_steps_ids,
+                                                 arrival_time_steps_ids, time_delta, edge_weights_td,
+                                                 vertiports_list, drones_departure, drones_arrival,
+                                                 vertiport_reserved, extend_edges_list)
+        
+        model.start = initial_values
 
     model.max_mip_gap = constants.ALLOWED_GAP
     model.optimize(max_seconds=constants.MAXIMUM_RUNTIME)
