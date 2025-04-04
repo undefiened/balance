@@ -16,8 +16,8 @@ import optimization
 
 
 def setUp(path):
-    start, time_horizon, time_delta, speed, nodes, edges, intents = main.read_example(path)
-    nodes, edges, intents = main.create_dicts(nodes, edges, intents, time_horizon, time_delta, speed)
+    start, time_horizon, time_delta, speed, nodes, edges, intents, add_reverse_edges = main.read_example(path)
+    nodes, edges, intents = main.create_dicts(nodes, edges, intents, time_horizon, time_delta, speed, add_reverse_edges)
 
     return start, time_horizon, time_delta, nodes, edges, intents
 
@@ -61,7 +61,7 @@ def run_test(self):
 class Example1(unittest.TestCase):
     """A small graph of two edges and one intent."""
     def setUp(self) -> None:
-        self.start, self.time_horizon, self.time_delta, self.nodes, self.edges, self.intents = (
+        self.start, self.time_horizon, self.time_delta, self.nodes, self.edges, self.intents, self.add_reverse_edges = (
             setUp('tests/test_examples/test1.json'))
 
         self.ideal_times = [11]
