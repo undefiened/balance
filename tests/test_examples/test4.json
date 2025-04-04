@@ -9,7 +9,7 @@
         {"name": "v2", "capacity": 2}
     ],
     "edges": [
-        {"source":  "v0", "destination":  "v1", "weight": 4},
+        {"source":  "v0", "destination":  "v1", "weight": 30},
         {"source":  "v1", "destination":  "v2", "weight": 6}
     ],
     "intents": [

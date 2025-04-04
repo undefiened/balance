@@ -173,7 +173,12 @@ def ip_optimization(nodes: dict, edges: dict, intents: dict, time_steps: range, 
         lambda x: edges_list + [(intents[drones_list[x]].source.name, intents[drones_list[x]].source.name)]
 
     # ---- Model definition ----
-    model = mip.Model(name="balance", sense=mip.MINIMIZE, solver_name=mip.GUROBI)
+    try:
+        model = mip.Model(name="balance", sense=mip.MINIMIZE, solver_name=mip.GUROBI)
+    except Exception as e:
+        print(f"Gurobi solver not available: {e}")
+        print("Using CBC solver instead")
+        model = mip.Model(name="balance", sense=mip.MINIMIZE, solver_name=mip.CBC)
 
     # ---- Decision variables ----
     # whether drone `d` traverses edge `e` starting at time step `t`

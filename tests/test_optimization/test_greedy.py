@@ -102,7 +102,7 @@ class Example4(unittest.TestCase):
         # assert goal node is reached
         self.assertIs(goal_node, None)
         self.assertEqual(operation_intent.actual_greedy_time, 0)
-        self.assertEqual(operation_intent.ideal_time, 10)
+        self.assertEqual(operation_intent.ideal_time, 36)
 
 
 class Example5(unittest.TestCase):
