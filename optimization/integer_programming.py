@@ -327,17 +327,18 @@ def ip_optimization(nodes: dict, edges: dict, intents: dict, time_steps: range, 
 
     # ---- Output ----
     if model.num_solutions:
-        # print("DID WE GET HERE??", flush=True)
-        drones_arrival_x = [[[arrival_var.x for arrival_var in drone] for drone in edge] for edge in drones_arrival]
-        drones_departure_x = [[[departure_var.x for departure_var in drone] for drone in edge] for edge in drones_departure]
-        vertiport_reserved_x = [[[vertiport_var.x for vertiport_var in t] for t in drone] for drone in vertiport_reserved]
-        import pickle
-        pickle.dump((drones_arrival_x, drones_departure_x, vertiport_reserved_x), open("results/drones_arrival_x_{len(intents)}.pkl", "wb"))
+
+        if constants.DEBUG:
+            drones_arrival_x = [[[arrival_var.x for arrival_var in drone] for drone in edge] for edge in drones_arrival]
+            drones_departure_x = [[[departure_var.x for departure_var in drone] for drone in edge] for edge in drones_departure]
+            vertiport_reserved_x = [[[vertiport_var.x for vertiport_var in t] for t in drone] for drone in vertiport_reserved]
+            import pickle
+            pickle.dump((drones_arrival_x, drones_departure_x, vertiport_reserved_x), open("results/ip_solution_debug_{}.pkl".format(len(intents)), "wb"))
+        
         ip_obj = model.objective_value
 
         # build the path of each drone
         for d in drones_ids:
-            print(f"Drone={d}\n{'='*100}", flush=True)
             path = []
             intent = intents[drones_list[d]]
             travel_time = 0
