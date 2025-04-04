@@ -16,4 +16,5 @@ USE_WARM_UP_SOLUTION_FOR_IP = True
 SORT_INTENTS_BY_DEPARTURE_TIME = False
 
 DEBUG = True
+ADD_REVERSE_EDGES = False
 # =============================================== END OF FILE ===============================================

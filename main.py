@@ -22,7 +22,7 @@ import numpy as np
 import pandas as pd
 
 import checks
-from constants import GREEDY_TIME_HORIZON_MULTIPLIER, IP_TIME_HORIZON_MULTIPLIER, SORT_INTENTS_BY_DEPARTURE_TIME
+from constants import ADD_REVERSE_EDGES, GREEDY_TIME_HORIZON_MULTIPLIER, IP_TIME_HORIZON_MULTIPLIER, SORT_INTENTS_BY_DEPARTURE_TIME
 import graph
 import intent
 import optimization
@@ -160,7 +160,7 @@ class ResultsAnalysis:
 
 
 def read_example(path: str, intents=None) \
-        -> Tuple[int, int, int, Union[int, float], List[Dict], List[Dict], List[Dict]]:
+        -> Tuple[int, int, int, Union[int, float], List[Dict], List[Dict], List[Dict], bool]:
     """
     Opens an example file, reads it and returns its content. Program exits if json data format is invalid.
     It will throw assertion errors if the actual data is of incorrect type or value.
@@ -174,8 +174,8 @@ def read_example(path: str, intents=None) \
 
     Returns
     -------
-    return value: Tuple[int, int, int, List[Dict], List[Dict], List[Dict]]
-        A tuple (start_time, time_horizon, time_delta, speed, nodes_list, edges_list, intents_list)
+    return value: Tuple[int, int, int, List[Dict], List[Dict], List[Dict]], bool
+        A tuple (start_time, time_horizon, time_delta, speed, nodes_list, edges_list, intents_list, add_reverse_edges)
 
     """
     with open(path, 'r') as f:
@@ -212,6 +212,8 @@ def read_example(path: str, intents=None) \
                    isinstance(edge['weight'], int) and edge['weight'] >= 0, (
                 f"{edge}: Either syntax error in edge names, weight being non integer or negative.")
 
+        add_reverse_edges = data.get("add_reverse_edges", False)
+
         if intents is None:
             intents_list = data["intents"]
         else:
@@ -226,11 +228,11 @@ def read_example(path: str, intents=None) \
         if SORT_INTENTS_BY_DEPARTURE_TIME:
             intents_list.sort(key=lambda x: x['start'])
 
-        return start, time_horizon, time_delta, speed, nodes, edges, intents_list
+        return start, time_horizon, time_delta, speed, nodes, edges, intents_list, add_reverse_edges
 
 
 def create_dicts(nodes: List[Dict], edges: List[Dict], intents: List[Dict], time_horizon: int, time_delta: int,
-                 speed: Union[int, float]) -> Tuple[Dict, Dict, Dict]:
+                 speed: Union[int, float], add_reverse_edges: bool) -> Tuple[Dict, Dict, Dict]:
     """
     Creates dictionaries of intents, nodes, edges given lists of these.
     Parameters
@@ -247,6 +249,8 @@ def create_dicts(nodes: List[Dict], edges: List[Dict], intents: List[Dict], time
         Time delta.
     speed: Union[int, float]
         Common speed of all intents.
+    add_reverse_edges: bool
+        Whether to add reverse edges to the graph.
 
     Returns
     -------
@@ -263,11 +267,12 @@ def create_dicts(nodes: List[Dict], edges: List[Dict], intents: List[Dict], time
         for e in edges
     }
 
-    # Add reverse edges
-    edges_dict.update({
-        (e["destination"], e["source"]): graph.Edge(nodes_dict[e["destination"]], nodes_dict[e["source"]], math.ceil(e["weight"] / speed))
-        for e in edges
-    })
+    if ADD_REVERSE_EDGES or add_reverse_edges:
+        # Add reverse edges
+        edges_dict.update({
+            (e["destination"], e["source"]): graph.Edge(nodes_dict[e["destination"]], nodes_dict[e["source"]], math.ceil(e["weight"] / speed))
+            for e in edges
+        })
 
     intents_dict = {
         (i["source"], i["destination"], i["start"]):
@@ -597,8 +602,8 @@ def main(path: str, verbose: bool, intents_lst: List = None, analysis_obj: Resul
 
     """
     # --- Read data and create variables ---
-    start, time_horizon, time_delta, speed, nodes, edges,  intents = read_example(path=path, intents=intents_lst)
-    nodes_dict, edges_dict, intents_dict = create_dicts(nodes, edges, intents, max(GREEDY_TIME_HORIZON_MULTIPLIER, IP_TIME_HORIZON_MULTIPLIER)*time_horizon, time_delta, speed)
+    start, time_horizon, time_delta, speed, nodes, edges,  intents, add_reverse_edges = read_example(path=path, intents=intents_lst)
+    nodes_dict, edges_dict, intents_dict = create_dicts(nodes, edges, intents, max(GREEDY_TIME_HORIZON_MULTIPLIER, IP_TIME_HORIZON_MULTIPLIER)*time_horizon, time_delta, speed, add_reverse_edges)
     time_steps = range(start, (IP_TIME_HORIZON_MULTIPLIER*time_horizon + 1), time_delta)
 
     # --- Solve Greedy ---
