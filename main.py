@@ -667,7 +667,7 @@ if __name__ == "__main__":
         graph_path = graph_name
     else:
         graph_path = f"./graphs/{graph_name}.json"
-    _, TIME_HORIZON, TIME_DELTA, _, _, _, _ = read_example(graph_path, None)
+    _, TIME_HORIZON, TIME_DELTA, _, _, _, _, _ = read_example(graph_path, None)
 
     if random_intents:
         print(f"\nExample with {num_intents} intents:\n{'=' * 100}", flush=True)
