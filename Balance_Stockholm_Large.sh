@@ -5,8 +5,8 @@
 #SBATCH --exclusive
 #SBATCH -N 1
 #SBATCH --mail-user=leonid.sedov@liu.se
-#SBATCH -o Balance_Stockholm_Large.out
-#SBATCH -e Balance_Stockholm_Large.err
+#SBATCH -o results/Balance_Stockholm_Large_"$1".out
+#SBATCH -e results/Balance_Stockholm_Large_"$1".err
 #SBATCH --mail-type=ALL
 
 #sleep 100
