@@ -61,7 +61,7 @@ def run_test(self):
 class Example1(unittest.TestCase):
     """A small graph of two edges and one intent."""
     def setUp(self) -> None:
-        self.start, self.time_horizon, self.time_delta, self.nodes, self.edges, self.intents, self.add_reverse_edges = (
+        self.start, self.time_horizon, self.time_delta, self.nodes, self.edges, self.intents = (
             setUp('tests/test_examples/test1.json'))
 
         self.ideal_times = [11]
