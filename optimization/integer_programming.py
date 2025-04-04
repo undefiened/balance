@@ -27,13 +27,101 @@ The objective of the model is to find the shortest total time of operation for a
 """
 
 import math
-from typing import Union, Callable
+from typing import List, Tuple, Union, Callable
 
 import mip
 
 import constants
 import utils
 
+
+def get_drone_timesteps(d: int, earliest_departure_times: List[int], time_delta:int, time_steps: range) -> range:
+    return range(earliest_departure_times[d] // time_delta, len(time_steps))
+
+
+def generate_warm_up_ip_solution_from_greedy(intents: dict, edges_list: list, time_steps_ids: range, 
+                                             arrival_time_steps_ids: range, time_delta: int, 
+                                             edge_weights_td: list, vertiports_list: list, 
+                                             drones_departure: list, drones_arrival: list, 
+                                             vertiport_reserved: list, extend_edges_list: Callable) -> List[Tuple[object, int]]:
+    """
+    Use greedy solutions to warm start the MIP solver.
+
+    Parameters
+    ----------
+    intents: dict
+        Dictionary of the operational intents to be scheduled and their names.
+    edges_list: list
+        List of all valid edges plus extra edges indicating ground delay.
+    time_steps_ids: range
+        A range object for the discretized time steps.
+    arrival_time_steps_ids: range
+        A range object for the arrival time steps.
+    time_delta: int
+        Time discretization step.
+    edge_weights_td: list
+        Edge weights in terms of time delta.
+    vertiports_list: list
+        List of all vertiports.
+    drones_departure: list
+        Decision variables for drone departures.
+    drones_arrival: list
+        Decision variables for drone arrivals.
+    vertiport_reserved: list
+        Decision variables for vertiport reservations.
+    extend_edges_list: Callable
+        Function to extend the edges list for a specific drone.
+    """
+    initial_values = []
+
+    for d, intent in enumerate(intents.values()):
+        if hasattr(intent, 'greedy_solution_found') and intent.greedy_solution_found:
+            edges_list_extended = extend_edges_list(d)
+            
+            # Process each edge in the greedy path
+            for i in range(len(intent.path_greedy) - 1):
+                current_node = intent.path_greedy[i]
+                next_node = intent.path_greedy[i + 1]
+                
+                # Get edge index
+                edge_tuple = (current_node.name, next_node.name)
+                if edge_tuple in edges_list:
+                    e = edges_list.index(edge_tuple)
+                elif current_node.name == next_node.name:
+                    # This is a ground delay - last edge in extended edges_list
+                    e = len(edges_list)
+                else:
+                    continue
+                
+                # Get departure time step
+                departure_time = int(current_node.layer)
+                if departure_time < len(time_steps_ids):
+                    # Set departure variable
+                    initial_values.append((drones_departure[e][d][departure_time], 1))
+                    
+                    # Calculate arrival time based on edge weight
+                    edge_td = edge_weights_td[e] // time_delta
+                    arrival_time = departure_time + edge_td
+                    if arrival_time < len(arrival_time_steps_ids):
+                        initial_values.append((drones_arrival[e][d][arrival_time], 1))
+                    
+                    # Set vertiport reservation for destination node
+                    if next_node.name in vertiports_list:
+                        v_idx = vertiports_list.index(next_node.name)
+                        # Reserve from arrival time
+                        if arrival_time < len(time_steps_ids):
+                            initial_values.append((vertiport_reserved[v_idx][d][arrival_time], 1))
+                        
+                        # If next_node has reservation info, use it
+                        if hasattr(next_node, 'left_reserved_layer') and hasattr(next_node, 'right_reserved_layer'):
+                            left_layer = int(next_node.left_reserved_layer)
+                            right_layer = int(next_node.right_reserved_layer)
+                            
+                            # Set reservation for the known duration
+                            for t in range(max(0, left_layer), min(right_layer + 1, len(time_steps_ids))):
+                                initial_values.append((vertiport_reserved[v_idx][d][t], 1))
+
+    return initial_values
 
 def ip_optimization(nodes: dict, edges: dict, intents: dict, time_steps: range, time_delta: int) -> Union[float, None]:
     """
@@ -76,27 +164,39 @@ def ip_optimization(nodes: dict, edges: dict, intents: dict, time_steps: range, 
     edge_weights = [edge.weight for edge in edges.values()] + [time_delta]
     # edge weights in terms of time delta
     edge_weights_td = [math.ceil(edge.weight / time_delta) * time_delta for edge in edges.values()] + [time_delta]
+    
+    largest_edge_weight = max(edge_weights_td)
+    arrival_time_steps_ids = range(len(time_steps) + 4*(largest_edge_weight//time_delta))
 
     # function that takes a drone d's id, and returns the edges_list with the edge (d.source, d.source) added to it
     extend_edges_list: Callable[[int], list[tuple[str, str]]] = \
         lambda x: edges_list + [(intents[drones_list[x]].source.name, intents[drones_list[x]].source.name)]
 
     # ---- Model definition ----
-    model = mip.Model(name="balance", sense=mip.MINIMIZE, solver_name=mip.GUROBI)
+    try:
+        model = mip.Model(name="balance", sense=mip.MINIMIZE, solver_name=mip.GUROBI)
+    except Exception as e:
+        print(f"Gurobi solver not available: {e}")
+        print("Using CBC solver instead")
+        model = mip.Model(name="balance", sense=mip.MINIMIZE, solver_name=mip.CBC)
 
     # ---- Decision variables ----
     # whether drone `d` traverses edge `e` starting at time step `t`
-    drones_departure = [[[model.add_var(name=f"Departure_{extend_edges_list(d)[e]}__D{d}__T{t * time_delta}",
+    drones_departure = [[[model.add_var(name=f"D_{extend_edges_list(d)[e]}__D{d}__T{t * time_delta}",
                                         var_type=mip.BINARY)
                           for t in time_steps_ids] for d in drones_ids] for e in edges_ids]
 
     # whether drone `d` finishes taking edge `e` at time step `t`
-    drones_arrival = [[[model.add_var(name=f"Arrival_{extend_edges_list(d)[e]}__D{d}__T_{t * time_delta}",
-                                      var_type=mip.BINARY)
-                        for t in time_steps_ids] for d in drones_ids] for e in edges_ids]
+    # drones_arrival = [[[model.add_var(name=f"Arrival_{extend_edges_list(d)[e]}__D{d}__T_{t * time_delta}",
+    #                                   var_type=mip.BINARY)
+    #                     for t in time_steps_ids] for d in drones_ids] for e in edges_ids]
+
+    drones_arrival = [[[model.add_var(name=f"A_{extend_edges_list(d)[e]}__D{d}__T_{t * time_delta}",
+                                      var_type=mip.BINARY) 
+                                      for t in arrival_time_steps_ids] for d in drones_ids] for e in edges_ids]
 
     # whether vertiport `v` is reserved for drone `d` starting at time step `t`
-    vertiport_reserved = [[[model.add_var(name=f"Vertiport_{vertiports_list[v]}__D{d}__T_{t * time_delta}",
+    vertiport_reserved = [[[model.add_var(name=f"V_{vertiports_list[v]}__D{d}__T_{t * time_delta}",
                                           var_type=mip.BINARY)
                             for t in time_steps_ids] for d in drones_ids] for v in vertiports_ids]
 
@@ -112,8 +212,8 @@ def ip_optimization(nodes: dict, edges: dict, intents: dict, time_steps: range, 
             k_name = vertiports_list[k]
             incoming_edges = [e for e in edges_ids if edges_list_extended[e][1] == k_name]
             outgoing_edges = [e for e in edges_ids if edges_list_extended[e][0] == k_name]
-            msg = f"Flow conservation constraint__D{d}__{k_name} "
-            for t in time_steps_ids:
+            msg = f"Fcc__D{d}__{k_name} " # flow conservation constraint
+            for t in get_drone_timesteps(d, earliest_departure_times, time_delta, time_steps):
                 # case 1: where `k` is the origin vertiport and `t` is departure time:
                 if k_name == src and (t * time_delta) == dept_time:
                     model.add_constr(mip.xsum(drones_arrival[e][d][t] for e in incoming_edges)
@@ -141,15 +241,15 @@ def ip_optimization(nodes: dict, edges: dict, intents: dict, time_steps: range, 
             weight_uncertainty = [
                 math.ceil((edge_weights[idx] + U * int(idx < len(edges))) / time_delta) for idx in valid_edges
             ]
-            for t in time_steps_ids[:-1]:
-                T = time_steps_ids[-1]
+            for t in get_drone_timesteps(d, earliest_departure_times, time_delta, time_steps)[:-1]:
+                T = get_drone_timesteps(d, earliest_departure_times, time_delta, time_steps)[-1]
                 time_ranges = [range(max(0, t - weight_uncertainty[idx] + 1), min(t, T) + 1)
                                for idx, _ in enumerate(valid_edges)]
                 model.add_constr(
                     (1 / M) * mip.xsum(drones_departure[e][d][tau] for indx, e in enumerate(valid_edges)
                                        for tau in time_ranges[indx])
                     <= vertiport_reserved[v][d][t + 1],
-                    f"Reservation constraint Vertiport_{v}__Drone_{d}__Time_{t * time_delta}")
+                    f"RcV_{v}__D_{d}_T_{t * time_delta}") # Reservation constraint Vertiport
 
     # 3. A vertiport cannot be overcapacitated at any point in time, meaning sum
     #    of all reservations of a vertiport cannot exceed the maximum capacity.
@@ -157,7 +257,7 @@ def ip_optimization(nodes: dict, edges: dict, intents: dict, time_steps: range, 
         v_max_capacity = nodes[vertiports_list[v]].capacity
         for t in time_steps_ids:
             model.add_constr(mip.xsum(vertiport_reserved[v][d][t] for d in drones_ids)
-                             <= v_max_capacity, "Capacity constraint")
+                             <= v_max_capacity, "CC") #Capacity constraint
 
     # 4. An operation cannot start earlier than its time of departure, that is all edges with source
     #    being start vertiport and at all times before departure, these edges must have value 0.
@@ -168,39 +268,49 @@ def ip_optimization(nodes: dict, edges: dict, intents: dict, time_steps: range, 
         earlier_times = range(departure_time)
         valid_edges = [idx for idx in edges_ids if edges_list_extended[idx][0] == src]
         model.add_constr(mip.xsum(drones_departure[e][d][t] for t in earlier_times for e in valid_edges) == 0,
-                         "No early departure constraint")
+                         "Nedc") # No earlier departure constraint
 
     # 5. Arrival constraint: a drone must end up in its detination vertiport.
     for d in drones_ids:
         edges_list_extended = extend_edges_list(d)
         dest = destination_vertiports_names[d]
         valid_edges = [idx for idx in edges_ids if edges_list_extended[idx][1] == dest]
-        model.add_constr(mip.xsum(drones_departure[e][d][t] for t in time_steps_ids[:-1] for e in valid_edges) == 1,
-                         "Arrival constraint")
+        model.add_constr(mip.xsum(drones_departure[e][d][t] for t in get_drone_timesteps(d, earliest_departure_times, time_delta, time_steps)[:-1] for e in valid_edges) == 1,
+                         "Ac") #Arrival constraint
 
     # 6. The value of the decision variable for arrival of an edge must equal
     #    the value of the decision variable of departure time for that edge.
     for e in edges_ids:
         edge_weight = edge_weights_td[e]
         for d in drones_ids:
-            for t in time_steps_ids:
+            for t in get_drone_timesteps(d, earliest_departure_times, time_delta, time_steps):
                 w = t - (edge_weight // time_delta)
                 if w >= 0:
                     model.add_constr(drones_arrival[e][d][t] == drones_departure[e][d][w],
-                                     "Drone arrival and departure times differs by edge weight.")
+                                     "DADew") # Drone arrival and departure times differs by edge weight
+                else:
+                    model.add_constr(drones_arrival[e][d][t] == 0,
+                                     "Ia") # Impossible arrival
+    
+    for e in edges_ids:
+        for d in drones_ids:
+            for t in range(math.floor(earliest_departure_times[d]//time_delta)-1):
+                model.add_constr(drones_arrival[e][d][t] == 0) 
+                model.add_constr(drones_departure[e][d][t] == 0)
+    
+    # for v in vertiports_ids:
+    #     for d in drones_ids:
+    #         for t in range(math.floor(earliest_departure_times[d]//time_delta)-1):
+    #             model.add_constr(vertiport_reserved[v][d][t] == 0)
 
-    # Extra: A drone's total travel time cannot pass beyond time horizon.
-    T = time_steps[-1]
-    for d in drones_ids:
-        model.add_constr(mip.xsum(drones_departure[e][d][t] * edge_weights_td[e]
-                                  for t in time_steps_ids for e in edges_ids)
-                         <= T, "")
+    # for e in edges_ids:
+    #     edge_weight = edge_weights_td[e]
+    #     for d in drones_ids:
+    #         for t in time_steps_ids:
+    #             arr_t = t + (edge_weight // time_delta)
+    #             model.add_constr(drones_arrival[e][d][arr_t] == drones_departure[e][d][t],
+    #                                  "Drone arrival and departure times differs by edge weight.")
 
-    # Extra: A drone can traverse one edge at a time.
-    for d in drones_ids:
-        for t in time_steps_ids:
-            model.add_constr(mip.xsum(drones_departure[e][d][t] for e in edges_ids) <= 1,
-                             "One edge at a time is traversed.")
 
     # ---- Objective ----
     # minimizing the total sum of times of all drone schedules.
@@ -209,11 +319,27 @@ def ip_optimization(nodes: dict, edges: dict, intents: dict, time_steps: range, 
                        + mip.xsum(vertiport_reserved[v][d][t]
                                   for t in time_steps_ids for d in drones_ids for v in vertiports_ids) / 9999999)
 
+    if constants.USE_WARM_UP_SOLUTION_FOR_IP:
+        initial_values = generate_warm_up_ip_solution_from_greedy(intents, edges_list, time_steps_ids,
+                                                 arrival_time_steps_ids, time_delta, edge_weights_td,
+                                                 vertiports_list, drones_departure, drones_arrival,
+                                                 vertiport_reserved, extend_edges_list)
+        
+        model.start = initial_values
+
     model.max_mip_gap = constants.ALLOWED_GAP
     model.optimize(max_seconds=constants.MAXIMUM_RUNTIME)
 
     # ---- Output ----
     if model.num_solutions:
+
+        if constants.DEBUG:
+            drones_arrival_x = [[[arrival_var.x for arrival_var in drone] for drone in edge] for edge in drones_arrival]
+            drones_departure_x = [[[departure_var.x for departure_var in drone] for drone in edge] for edge in drones_departure]
+            vertiport_reserved_x = [[[vertiport_var.x for vertiport_var in t] for t in drone] for drone in vertiport_reserved]
+            import pickle
+            pickle.dump((drones_arrival_x, drones_departure_x, vertiport_reserved_x), open("results/ip_solution_debug_{}.pkl".format(len(intents)), "wb"))
+        
         ip_obj = model.objective_value
 
         # build the path of each drone
@@ -276,3 +402,5 @@ def ip_optimization(nodes: dict, edges: dict, intents: dict, time_steps: range, 
     return ip_obj if model.num_solutions else None, model
 
 # =============================================== END OF FILE ===============================================
+
+

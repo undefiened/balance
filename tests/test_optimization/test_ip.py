@@ -16,8 +16,8 @@ import optimization
 
 
 def setUp(path):
-    start, time_horizon, time_delta, speed, nodes, edges, intents = main.read_example(path)
-    nodes, edges, intents = main.create_dicts(nodes, edges, intents, time_horizon, time_delta, speed)
+    start, time_horizon, time_delta, speed, nodes, edges, intents, add_reverse_edges = main.read_example(path)
+    nodes, edges, intents = main.create_dicts(nodes, edges, intents, time_horizon, time_delta, speed, add_reverse_edges)
 
     return start, time_horizon, time_delta, nodes, edges, intents
 

@@ -18,6 +18,7 @@ from typing import List
 
 import numpy as np
 
+from constants import DEBUG
 import utils
 
 
@@ -120,10 +121,20 @@ def capacity_correctness(intents: dict, nodes: dict, time_delta: int, time_horiz
     reservations_greedy = np.zeros((n_vertiports, n_layers+1))
     reservations_ip = np.zeros((n_vertiports, n_layers+1))
 
+    names = ['GREEDY', 'INTEGER PROGRAMMING']
+    J = 0
+
     for idx, intent in enumerate(intents.values()):
         path_greedy, path_ip = intent.path_greedy, intent.path_ip
 
         for path, reservations in zip([path_greedy, path_ip], [reservations_greedy, reservations_ip]):
+            if DEBUG:
+                print(names[J])
+                J = (J+1)%2
+                print(f"{idx}: Drone={intent}", flush=True)
+                print(f"path={path}", flush=True)
+                print(f"{'='*100}")
+            
             for i in range(len(path[:-1])):
                 dep_link, arr_link = path[i], path[i + 1]
                 dep_node, arr_node = dep_link.name, arr_link.name

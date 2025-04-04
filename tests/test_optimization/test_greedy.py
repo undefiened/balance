@@ -16,8 +16,8 @@ import optimization
 
 
 def setUp(path):
-    start, time_horizon, time_delta, speed, nodes, edges, intents = main.read_example(path)
-    nodes, edges, intents = main.create_dicts(nodes, edges, intents, time_horizon, time_delta, speed)
+    start, time_horizon, time_delta, speed, nodes, edges, intents, add_reverse_edges = main.read_example(path)
+    nodes, edges, intents = main.create_dicts(nodes, edges, intents, time_horizon, time_delta, speed, add_reverse_edges)
 
     return start, time_horizon, time_delta, nodes, edges, intents
 
@@ -102,7 +102,7 @@ class Example4(unittest.TestCase):
         # assert goal node is reached
         self.assertIs(goal_node, None)
         self.assertEqual(operation_intent.actual_greedy_time, 0)
-        self.assertEqual(operation_intent.ideal_time, 10)
+        self.assertEqual(operation_intent.ideal_time, 36)
 
 
 class Example5(unittest.TestCase):
