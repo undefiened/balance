@@ -10,7 +10,7 @@
 #SBATCH --mail-type=ALL
 
 #sleep 100
-module load gurobi/9.0.0-nsc1
+module load gurobi/10.0.0-nsc1
 module load Python/3.10.4-bare-hpc1-gcc-2022a-eb
 source venv/bin/activate
 
