@@ -13,6 +13,7 @@ import unittest
 import checks
 import main
 import optimization
+import solution
 
 
 def setUp(path):
@@ -24,12 +25,18 @@ def setUp(path):
 
 def run_test(self):
     index = 0
+    greedy_solutions = {}
+    greedy_paths = {}
+    
     for intent_name, operation_intent in self.intents.items():
         main.uncertainty_reservation_handling('increment', intent_name, operation_intent, self.nodes,
-                                              self.intents, self.time_delta)
+                                              greedy_solutions, greedy_paths, self.time_delta)
 
-        goal_node = optimization.find_shortest_path_extended(operation_intent, self.time_delta, self.nodes)
-        optimization.find_shortest_path(operation_intent, self.nodes)
+        goal_node, actual_time, path, adjusted_start = optimization.find_shortest_path_extended(
+            operation_intent, self.time_delta, self.nodes)
+        ideal_time = optimization.find_shortest_path(operation_intent, self.nodes)
+
+        intent_key = (operation_intent.source.name, operation_intent.destination.name, operation_intent.start)
 
         # assert goal node is reached
         self.assertEqual(goal_node.name_original, operation_intent.destination.name)
@@ -38,24 +45,44 @@ def run_test(self):
         self.assertEqual(goal_node.layer, self.destination_layers[index])
 
         # assert actual time is correct
-        self.assertEqual(operation_intent.actual_greedy_time, self.actual_times[index])
+        self.assertEqual(actual_time, self.actual_times[index])
 
         # assert ideal time is correct
-        self.assertEqual(operation_intent.ideal_time, self.ideal_times[index])
+        self.assertEqual(ideal_time, self.ideal_times[index])
+
+        # Store solution
+        intent_solution = solution.IntentSolution(
+            intent_key=intent_key,
+            path=path,
+            actual_time=actual_time,
+            ideal_time=ideal_time,
+            solution_found=True,
+            adjusted_start=adjusted_start
+        )
+        greedy_solutions[intent_key] = intent_solution
+        greedy_paths[intent_name] = path
 
         main.uncertainty_reservation_handling('decrement', intent_name, operation_intent, self.nodes,
-                                              self.intents, self.time_delta)
+                                              greedy_solutions, greedy_paths, self.time_delta)
 
         main.adjust_capacities(goal_node, self.nodes)
 
         index += 1
 
+    # Create solution object
+    greedy_solution = solution.GreedySolution(
+        solutions=greedy_solutions,
+        total_objective=sum(sol.time_difference for sol in greedy_solutions.values() if sol.time_difference)
+    )
+
     # assert solution is valid
+    ip_solution = solution.IPSolution(solutions={}, total_objective=None, model_gap=0.0)
     greedy_valid_solution, _ = (
-        checks.sanity_check(self.intents, self.nodes, self.edges, self.time_delta, self.time_horizon))
+        checks.sanity_check_with_solutions(self.intents, self.nodes, self.edges, self.time_delta, 
+                                         self.time_horizon, greedy_solution, ip_solution))
     self.assertTrue(greedy_valid_solution.time_correct)
     self.assertTrue(greedy_valid_solution.capacity_correct)
-    self.assertTrue(not greedy_valid_solution.cycles_exists)
+    self.assertTrue(not greedy_valid_solution.cycles)
 
 
 class Example1(unittest.TestCase):
@@ -96,13 +123,14 @@ class Example4(unittest.TestCase):
         index = 0
 
         intent_name, operation_intent = list(self.intents.items())[index]
-        goal_node = optimization.find_shortest_path_extended(operation_intent, self.time_delta, self.nodes)
-        optimization.find_shortest_path(operation_intent, self.nodes)
+        goal_node, actual_time, path, adjusted_start = optimization.find_shortest_path_extended(
+            operation_intent, self.time_delta, self.nodes)
+        ideal_time = optimization.find_shortest_path(operation_intent, self.nodes)
 
         # assert goal node is reached
         self.assertIs(goal_node, None)
-        self.assertEqual(operation_intent.actual_greedy_time, 0)
-        self.assertEqual(operation_intent.ideal_time, 36)
+        self.assertEqual(actual_time, None)
+        self.assertEqual(ideal_time, 36)
 
 
 class Example5(unittest.TestCase):
@@ -200,12 +228,15 @@ class Example11(unittest.TestCase):
         self.destination_layers = [7, None]
 
     def test_dijkstra(self):
-        _, operation_intent = list(self.intents.items())[-1]
-        self.intents = {key: val for key, val in list(self.intents.items())[:-1]}
+        # Test first intent
+        first_intent_dict = {key: val for key, val in list(self.intents.items())[:-1]}
+        self.intents = first_intent_dict
         run_test(self)
 
+        # Test second intent separately
         intent_name, operation_intent = list(self.intents.items())[-1]
-        goal_node = optimization.find_shortest_path_extended(operation_intent, self.time_delta, self.nodes)
+        goal_node, actual_time, path, adjusted_start = optimization.find_shortest_path_extended(
+            operation_intent, self.time_delta, self.nodes)
         self.assertIs(goal_node, None)
 
 

@@ -27,7 +27,7 @@ The objective of the model is to find the shortest total time of operation for a
 """
 
 import math
-from typing import List, Tuple, Union, Callable
+from typing import List, Tuple, Union, Callable, Dict
 
 import mip
 
@@ -43,7 +43,8 @@ def generate_warm_up_ip_solution_from_greedy(intents: dict, edges_list: list, ti
                                              arrival_time_steps_ids: range, time_delta: int, 
                                              edge_weights_td: list, vertiports_list: list, 
                                              drones_departure: list, drones_arrival: list, 
-                                             vertiport_reserved: list, extend_edges_list: Callable) -> List[Tuple[object, int]]:
+                                             vertiport_reserved: list, extend_edges_list: Callable,
+                                             greedy_solution) -> List[Tuple[object, int]]:
     """
     Use greedy solutions to warm start the MIP solver.
 
@@ -73,15 +74,21 @@ def generate_warm_up_ip_solution_from_greedy(intents: dict, edges_list: list, ti
         Function to extend the edges list for a specific drone.
     """
     initial_values = []
+    
+    if not greedy_solution:
+        return initial_values
 
-    for d, intent in enumerate(intents.values()):
-        if hasattr(intent, 'greedy_solution_found') and intent.greedy_solution_found:
+    for d, (intent_name, intent) in enumerate(intents.items()):
+        intent_key = (intent.source.name, intent.destination.name, intent.start)
+        greedy_sol = greedy_solution.get_solution(intent_key)
+        
+        if greedy_sol and greedy_sol.solution_found:
             edges_list_extended = extend_edges_list(d)
             
             # Process each edge in the greedy path
-            for i in range(len(intent.path_greedy) - 1):
-                current_node = intent.path_greedy[i]
-                next_node = intent.path_greedy[i + 1]
+            for i in range(len(greedy_sol.path) - 1):
+                current_node = greedy_sol.path[i]
+                next_node = greedy_sol.path[i + 1]
                 
                 # Get edge index
                 edge_tuple = (current_node.name, next_node.name)
@@ -123,7 +130,7 @@ def generate_warm_up_ip_solution_from_greedy(intents: dict, edges_list: list, ti
 
     return initial_values
 
-def ip_optimization(nodes: dict, edges: dict, intents: dict, time_steps: range, time_delta: int) -> Union[float, None]:
+def ip_optimization(nodes: dict, edges: dict, intents: dict, time_steps: range, time_delta: int, greedy_solution=None) -> Tuple[Union[float, None], mip.Model, Dict[str, Tuple[int, List[utils.Link]]]]:
     """
     This function runs an optimization model to find routing solution for each operational intent.
 
@@ -139,6 +146,8 @@ def ip_optimization(nodes: dict, edges: dict, intents: dict, time_steps: range, 
         A range object for the discretized time steps.
     time_delta: int
         Time discretization step.
+    greedy_solution: solution.GreedySolution (optional)
+        The greedy solution to use for warm-starting the IP solver.
 
     Returns
     -------
@@ -146,6 +155,8 @@ def ip_optimization(nodes: dict, edges: dict, intents: dict, time_steps: range, 
         The objective of the model.
     model: mip.Model
         The optimization model
+    intent_results: Dict[str, Tuple[int, List[utils.Link]]]
+        Dictionary mapping intent names to their (actual_time, path) results
     """
     ip_obj = 0
 
@@ -319,11 +330,11 @@ def ip_optimization(nodes: dict, edges: dict, intents: dict, time_steps: range, 
                        + mip.xsum(vertiport_reserved[v][d][t]
                                   for t in time_steps_ids for d in drones_ids for v in vertiports_ids) / 9999999)
 
-    if constants.USE_WARM_UP_SOLUTION_FOR_IP:
+    if constants.USE_WARM_UP_SOLUTION_FOR_IP and greedy_solution:
         initial_values = generate_warm_up_ip_solution_from_greedy(intents, edges_list, time_steps_ids,
                                                  arrival_time_steps_ids, time_delta, edge_weights_td,
                                                  vertiports_list, drones_departure, drones_arrival,
-                                                 vertiport_reserved, extend_edges_list)
+                                                 vertiport_reserved, extend_edges_list, greedy_solution)
         
         model.start = initial_values
 
@@ -331,6 +342,8 @@ def ip_optimization(nodes: dict, edges: dict, intents: dict, time_steps: range, 
     model.optimize(max_seconds=constants.MAXIMUM_RUNTIME)
 
     # ---- Output ----
+    intent_results = {}
+    
     if model.num_solutions:
 
         if constants.DEBUG:
@@ -396,10 +409,10 @@ def ip_optimization(nodes: dict, edges: dict, intents: dict, time_steps: range, 
                                           right_reserved_layer=right_most_reserved_layer)
                 path.append(arrival_link)
 
-                intent.actual_ip_time = travel_time
-                intent.build_ip_path(path)
+                # Store results for this intent
+                intent_results[drones_list[d]] = (travel_time, path)
 
-    return ip_obj if model.num_solutions else None, model
+    return ip_obj if model.num_solutions else None, model, intent_results
 
 # =============================================== END OF FILE ===============================================
 

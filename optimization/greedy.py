@@ -5,14 +5,15 @@ This file implements the original Dijkstra's algorithm as well as a specialized 
 It is used to find the shortest paths for operational intents.
 """
 
-from typing import Dict, Union
+from typing import Dict, Union, Tuple, Optional, List
 import queue
 
 import graph
 import intent
+import utils
 
 
-def find_shortest_path(operation_intent: intent.Intent, nodes_dict: Dict[str, graph.Node]) -> None:
+def find_shortest_path(operation_intent: intent.Intent, nodes_dict: Dict[str, graph.Node]) -> Optional[int]:
     """
     Runs the original Dijkstra's algorithm to find the shortest path.
     The graph is built successively.
@@ -24,11 +25,13 @@ def find_shortest_path(operation_intent: intent.Intent, nodes_dict: Dict[str, gr
             Dictionary of all node objects and their names as keys.
 
     Returns:
+        ideal_time: Optional[int]
+            The ideal time to reach destination, or None if no path found.
 
     """
     source_node = operation_intent.source
     destination_node = operation_intent.destination
-    ideal_time: Union[float, int] = 0
+    ideal_time: Optional[int] = None
 
     distances: Dict[str, Union[float, int]] = {node.name: float('inf') for node in nodes_dict.values()}
     distances[source_node.name] = 0
@@ -39,7 +42,7 @@ def find_shortest_path(operation_intent: intent.Intent, nodes_dict: Dict[str, gr
     while not priority_queue.empty():
         dist_u, u = priority_queue.get()
         if u == destination_node:
-            ideal_time = distances[u.name]
+            ideal_time = int(distances[u.name])
             break
         if dist_u > distances[u.name]:
             continue
@@ -50,14 +53,11 @@ def find_shortest_path(operation_intent: intent.Intent, nodes_dict: Dict[str, gr
                 distances[v.name] = path_distance
                 priority_queue.put((path_distance, v))
 
-    if isinstance(ideal_time, int):
-        operation_intent.ideal_time = ideal_time
-
-    return None
+    return ideal_time
 
 
 def find_shortest_path_extended(operation_intent: intent.Intent, delta: int, nodes_dict: Dict[str, graph.Node]) \
-        -> Union[None, graph.ExtendedNode]:
+        -> Tuple[Optional[graph.ExtendedNode], Optional[int], Optional[List[utils.Link]], int]:
     """
     Runs the specialized Dijkstra's algorithm to find the shortest
     path in an extended network. The extended graph is built successively.
@@ -71,8 +71,14 @@ def find_shortest_path_extended(operation_intent: intent.Intent, delta: int, nod
             Dictionary of node objects and their names as keys.
 
     Returns:
-        destination_extended: Union[None, graph.ExtendedNode]
+        destination_extended: Optional[graph.ExtendedNode]
             The goal node in the extended graph or None if no path found.
+        actual_time: Optional[int]
+            The actual time to reach destination, or None if no path found.
+        path: Optional[List[utils.Link]]
+            The path as a list of links, or None if no path found.
+        adjusted_start: int
+            The adjusted start time (aligned to time delta).
 
     """
     source_node = operation_intent.source
@@ -83,7 +89,7 @@ def find_shortest_path_extended(operation_intent: intent.Intent, delta: int, nod
     # determine start layer
     k, r = divmod(start_time, delta)
     layer = k + (r > 0)
-    operation_intent.start = delta * layer
+    adjusted_start = delta * layer
 
     # create an extended node for the source node and add it to the queue
     source_node_extended = graph.ExtendedNode(source_node.name, layer, None, 0, 0, 0, -1)
@@ -157,9 +163,31 @@ def find_shortest_path_extended(operation_intent: intent.Intent, delta: int, nod
             unvisited_queue.put((current_itself.travel_time + GROUND_DELAY_PRIORITY_DECREMENTOR, current_itself))
 
     if destination_extended:
-        operation_intent.actual_greedy_time = destination_extended.travel_time
-        operation_intent.build_greedy_path(destination_extended)
+        actual_time = destination_extended.travel_time
+        path = build_path_from_extended_node(destination_extended)
+        return destination_extended, actual_time, path, adjusted_start
+    
+    return None, None, None, adjusted_start
 
-    return destination_extended
+
+def build_path_from_extended_node(goal_node: graph.ExtendedNode) -> List[utils.Link]:
+    """
+    Given a goal node, it backtracks on it to create a path from start to destination.
+    
+    Args:
+        goal_node: graph.ExtendedNode
+            The destination extended node.
+    
+    Returns:
+        path: List[utils.Link]
+            The path as a list of Link objects.
+    """
+    path = []
+    while goal_node is not None:
+        link = utils.Link(name=goal_node.name_original, layer=goal_node.layer, travel_time=goal_node.travel_time,
+                          left_reserved_layer=goal_node.left_reserve, right_reserved_layer=goal_node.right_reserve)
+        path.insert(0, link)
+        goal_node = goal_node.previous
+    return path
 
 # =============================================== END OF FILE ===============================================
