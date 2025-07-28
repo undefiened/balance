@@ -1,7 +1,7 @@
 {
     "start": 0,
     "time_horizon": 21600,
-    "time_delta": 60,
+    "time_delta": 120,
     "speed": 7,
     "add_reverse_edges": true,
     "nodes": [
