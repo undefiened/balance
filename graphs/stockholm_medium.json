@@ -1,6 +1,6 @@
 {
     "start": 0,
-    "time_horizon": 10800,
+    "time_horizon": 5400,
     "time_delta": 120,
     "speed": 7,
     "add_reverse_edges": true,
