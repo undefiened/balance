@@ -1,5 +1,5 @@
 #!/bin/sh
-#SBATCH -t 48:00:00
+#SBATCH -t 72:00:00
 #SBATCH -J Balance_Stockholm_Medium
 #SBATCH --mem=300000
 #SBATCH --exclusive
