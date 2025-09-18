@@ -84,13 +84,13 @@ def plot_results(dataframe, name):
     x_label = 'Number of flight intents'
     y_labels = ['Total travel time extension (min)', 'Runtime (min)', 'Memory usage (GB)',
                 'Delay of most delayed drone (min)', 'Average travel time extension (min)',
-                f'Percentage of drones with a travel time extension more than {max_travel_time_extension_percentage}%',
-                f'Percentage of drones with a travel time extension > {max_travel_time_extension_minutes} min']
+                f'Percentage of drones with \n travel time extension more than {max_travel_time_extension_percentage}%',
+                f'Percentage of drones with \n travel time extension > {max_travel_time_extension_minutes} min']
     titles = ['', 'Runtimes of the methods', 'Memory usages of the methods', '', '', '', '']
     plot_names = ['objective', 'runtime', 'memory_usage', 'delay', 'average_time_extension',
                   'percentage_time_extension', 'percentage_exceeding_20min']
     x_axis = dataframe.num_intents.values
-    fontsize = 12
+    fontsize = 18
     linewidth = 3
 
     for indx, elem in enumerate(data):
@@ -102,8 +102,9 @@ def plot_results(dataframe, name):
         ax.set_ylabel(y_labels[indx], family='serif', fontsize=fontsize)
         ax.set_title(titles[indx], family='serif', fontsize=fontsize)
         ax.set_xticks(x_axis)
+        ax.tick_params(axis='both', labelsize=fontsize)
 
-        ax.legend()
+        ax.legend(fontsize=fontsize)
 
         fig.savefig(f'./results/{name}/{plot_names[indx]}.png')
 
