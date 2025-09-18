@@ -90,7 +90,7 @@ def plot_results(dataframe, name):
     plot_names = ['objective', 'runtime', 'memory_usage', 'delay', 'average_time_extension',
                   'percentage_time_extension', 'percentage_exceeding_20min']
     x_axis = dataframe.num_intents.values
-    fontsize = 18
+    fontsize = 22
     linewidth = 3
 
     for indx, elem in enumerate(data):
@@ -99,14 +99,16 @@ def plot_results(dataframe, name):
         ax.plot(x_axis, elem[1], marker='o', ls='-', linewidth=linewidth, color=ip_color, label='IP')
 
         ax.set_xlabel(x_label, family='serif', fontsize=fontsize)
-        ax.set_ylabel(y_labels[indx], family='serif', fontsize=fontsize)
+        ax.set_ylabel(y_labels[indx], family='serif', fontsize=fontsize, labelpad=17)
         ax.set_title(titles[indx], family='serif', fontsize=fontsize)
         ax.set_xticks(x_axis)
         ax.tick_params(axis='both', labelsize=fontsize)
 
         ax.legend(fontsize=fontsize)
 
-        fig.savefig(f'./results/{name}/{plot_names[indx]}.png')
+        fig.tight_layout(pad=1.5)
+
+        fig.savefig(f'./results/{name}/{plot_names[indx]}.png', bbox_inches='tight', pad_inches=0.4)
 
     print("Plotting done.")
     return
