@@ -90,11 +90,13 @@ def plot_results(dataframe, name):
     plot_names = ['objective', 'runtime', 'memory_usage', 'delay', 'average_time_extension',
                   'percentage_time_extension', 'percentage_exceeding_20min']
     x_axis = dataframe.num_intents.values
-    fontsize = 22
+    fontsize = 24
     linewidth = 3
 
     for indx, elem in enumerate(data):
-        fig, ax = plt.subplots(1, 1, figsize=(12, 6))
+        fig, ax = plt.subplots(1, 1, figsize=(12, 6), layout="constrained")
+        # Add a tiny top-only padding by reserving minimal space for an empty suptitle
+        fig.suptitle("\n \n \n")
         ax.plot(x_axis, elem[0], marker='o', ls='-', linewidth=linewidth, color=greedy_color, label='Greedy')
         ax.plot(x_axis, elem[1], marker='o', ls='-', linewidth=linewidth, color=ip_color, label='IP')
 
@@ -106,9 +108,7 @@ def plot_results(dataframe, name):
 
         ax.legend(fontsize=fontsize)
 
-        fig.tight_layout(pad=1.5)
-
-        fig.savefig(f'./results/{name}/{plot_names[indx]}.png', bbox_inches='tight', pad_inches=0.4)
+        fig.savefig(f'./results/{name}/{plot_names[indx]}.pdf', format="pdf", bbox_inches='tight', pad_inches=0.12)
 
     print("Plotting done.")
     return

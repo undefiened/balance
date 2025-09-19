@@ -27,7 +27,7 @@ def plot_hardcoded_times() -> None:
     time_until_50pct_min = [v / 60.0 for v in time_until_50pct_sec]
 
     # Styling similar to plot_results.py
-    fontsize = 22
+    fontsize = 24
     linewidth = 3
 
     colors = {
@@ -54,8 +54,9 @@ def plot_hardcoded_times() -> None:
 
     out_dir = "./results/hardcoded_percentiles"
     os.makedirs(out_dir, exist_ok=True)
-    fig.savefig(os.path.join(out_dir, "time_until_percentiles_medium.png"), bbox_inches="tight", pad_inches=0.4)
 
+    fig.savefig(os.path.join(out_dir, "time_until_percentiles_medium.pdf"), format="pdf", bbox_inches="tight", pad_inches=0.4)
+    
     print("Saved plot to ./results/hardcoded_percentiles/time_until_percentiles_medium.png")
 
 
