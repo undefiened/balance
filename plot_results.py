@@ -82,10 +82,10 @@ def plot_results(dataframe, name):
 
     greedy_color, ip_color = 'mediumaquamarine', 'violet'
     x_label = 'Number of flight intents'
-    y_labels = ['Total travel time extension (min)', 'Runtime (min)', 'Memory usage (GB)',
-                'Delay of most delayed drone (min)', 'Average travel time extension (min)',
-                f'Percentage of drones with \n travel time extension more than {max_travel_time_extension_percentage}%',
-                f'Percentage of drones with \n travel time extension > {max_travel_time_extension_minutes} min']
+    y_labels = ['Total extension, min', 'Runtime, min', 'Memory usage, GB',
+                'Longest delay, min', 'Avg extension, min',
+                f'% with extension >{max_travel_time_extension_percentage}%',
+                f'% with extension >{max_travel_time_extension_minutes} min']
     titles = ['', 'Runtimes of the methods', 'Memory usages of the methods', '', '', '', '']
     plot_names = ['objective', 'runtime', 'memory_usage', 'delay', 'average_time_extension',
                   'percentage_time_extension', 'percentage_exceeding_20min']
