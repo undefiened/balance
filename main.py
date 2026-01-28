@@ -26,6 +26,7 @@ from constants import ADD_REVERSE_EDGES, GREEDY_TIME_HORIZON_MULTIPLIER, IP_TIME
 import graph
 import intent
 import optimization
+import solution
 import utils
 
 parser = argparse.ArgumentParser()
@@ -336,7 +337,7 @@ def create_intent(all_intents: list, time_horizon: int, time_delta: int):
 
 
 def solve_greedy(intents_dict: Dict[str, intent.Intent], time_delta: int, nodes_dict: Dict[str, graph.Node]) \
-        -> Tuple[Union[int, None], Union[graph.ExtendedNode, None]]:
+        -> solution.GreedySolution:
     """
     Given data related to an operational intent, it runs the greedy algorithms on that intent,
     and adjusts the layer reservations by handling time uncertainty.
@@ -352,37 +353,63 @@ def solve_greedy(intents_dict: Dict[str, intent.Intent], time_delta: int, nodes_
 
     Returns
     -------
-    greedy_obj: Union[int, None]
-        The objective. If no solution found, then None.
+    greedy_solution: solution.GreedySolution
+        The greedy solution containing all intent solutions and total objective.
 
     """
     greedy_obj: Union[int, None] = 0
+    greedy_solutions: Dict[tuple, solution.IntentSolution] = {}
+    greedy_paths: Dict[str, List[utils.Link]] = {}  # Store paths for uncertainty handling
 
     for intent_name, operation_intent in intents_dict.items():
         # for each previous drone, get path, update vertiport capacities
-        uncertainty_reservation_handling('increment', intent_name, operation_intent, nodes_dict, intents_dict,
-                                         time_delta)
+        uncertainty_reservation_handling('increment', intent_name, operation_intent, nodes_dict, 
+                                         greedy_solutions, greedy_paths, time_delta)
 
         # solve intent
-        goal_node = optimization.find_shortest_path_extended(operation_intent, time_delta, nodes_dict)
-        optimization.find_shortest_path(operation_intent, nodes_dict)
-        time_difference = operation_intent.greedy_time_difference
+        goal_node, actual_time, path, adjusted_start = optimization.find_shortest_path_extended(
+            operation_intent, time_delta, nodes_dict)
+        ideal_time = optimization.find_shortest_path(operation_intent, nodes_dict)
 
-        if goal_node and time_difference is not None:
+        intent_key = (operation_intent.source.name, operation_intent.destination.name, operation_intent.start)
+        
+        if goal_node and actual_time is not None and ideal_time is not None:
             adjust_capacities(goal_node, nodes_dict)
+            time_difference = actual_time - ideal_time
             greedy_obj += time_difference
+            
+            # Store the solution
+            intent_solution = solution.IntentSolution(
+                intent_key=intent_key,
+                path=path,
+                actual_time=actual_time,
+                ideal_time=ideal_time,
+                solution_found=True,
+                adjusted_start=adjusted_start
+            )
+            greedy_solutions[intent_key] = intent_solution
+            greedy_paths[intent_name] = path
         else:
-            # no solution found, so exit
-            return None
+            # no solution found, so store failed solution and return
+            intent_solution = solution.IntentSolution(
+                intent_key=intent_key,
+                path=[],
+                actual_time=0,
+                ideal_time=ideal_time or 0,
+                solution_found=False,
+                adjusted_start=adjusted_start if 'adjusted_start' in locals() else None
+            )
+            greedy_solutions[intent_key] = intent_solution
+            return solution.GreedySolution(solutions=greedy_solutions, total_objective=None)
 
         # for each previous drone, get path, update vertiport capacities
-        uncertainty_reservation_handling('decrement', intent_name, operation_intent, nodes_dict, intents_dict,
-                                         time_delta)
+        uncertainty_reservation_handling('decrement', intent_name, operation_intent, nodes_dict,
+                                         greedy_solutions, greedy_paths, time_delta)
 
-    return greedy_obj
+    return solution.GreedySolution(solutions=greedy_solutions, total_objective=greedy_obj)
 
 
-def solve_ip(nodes: dict, edges: dict, intents: dict, time_steps: range, time_delta: int) -> Union[float, None]:
+def solve_ip(nodes: dict, edges: dict, intents: dict, time_steps: range, time_delta: int, greedy_solution: solution.GreedySolution = None) -> Tuple[solution.IPSolution, mip.Model]:
     """
     This function calls the ip optimization model to find a schedule for all the intents.
 
@@ -398,20 +425,62 @@ def solve_ip(nodes: dict, edges: dict, intents: dict, time_steps: range, time_de
         A range object for the discretized time steps.
     time_delta: int
         Time discretization step.
+    greedy_solution: solution.GreedySolution (optional)
+        The greedy solution to use for warm-starting the IP solver.
 
     Returns
     -------
-    ip_obj: Union[float, None]
-        The objective of the model or none if no solution was found.
+    ip_solution: solution.IPSolution
+        The IP solution containing all intent solutions and total objective.
     ip_model: mip.Model
         The optimization model.
 
     """
-    ip_obj, ip_model = optimization.ip_optimization(nodes, edges, intents, time_steps, time_delta)
-    return ip_obj, ip_model
+    ip_obj, ip_model, intent_results = optimization.ip_optimization(nodes, edges, intents, time_steps, time_delta, greedy_solution)
+    
+    # Build IP solution object
+    ip_solutions: Dict[tuple, solution.IntentSolution] = {}
+    
+    # Calculate ideal times for all intents
+    ideal_times = {}
+    for intent_name, operation_intent in intents.items():
+        ideal_time = optimization.find_shortest_path(operation_intent, {node.name: node for node in nodes.values()})
+        ideal_times[intent_name] = ideal_time if ideal_time is not None else 0
+    
+    # Process results
+    for intent_name, operation_intent in intents.items():
+        intent_key = (operation_intent.source.name, operation_intent.destination.name, operation_intent.start)
+        
+        if intent_name in intent_results:
+            actual_time, path = intent_results[intent_name]
+            intent_solution = solution.IntentSolution(
+                intent_key=intent_key,
+                path=path,
+                actual_time=actual_time,
+                ideal_time=ideal_times[intent_name],
+                solution_found=True
+            )
+        else:
+            intent_solution = solution.IntentSolution(
+                intent_key=intent_key,
+                path=[],
+                actual_time=0,
+                ideal_time=ideal_times[intent_name],
+                solution_found=False
+            )
+        
+        ip_solutions[intent_key] = intent_solution
+    
+    ip_solution = solution.IPSolution(
+        solutions=ip_solutions,
+        total_objective=ip_obj,
+        model_gap=round(ip_model.gap, 3) if ip_model.num_solutions else 0.0
+    )
+    
+    return ip_solution, ip_model
 
 
-def print_solutions(intents: dict) -> None:
+def print_solutions(intents: dict, greedy_solution: solution.GreedySolution, ip_solution: solution.IPSolution) -> None:
     """
     Printing the solutions for each intent, in both greedy and ip parts.
     Also prints the operational time information.
@@ -419,14 +488,51 @@ def print_solutions(intents: dict) -> None:
     ----------
     intents: dict
         Dictionary of operational intents.
+    greedy_solution: solution.GreedySolution
+        The greedy solution results.
+    ip_solution: solution.IPSolution
+        The IP solution results.
 
     Returns
     -------
         None
     """
     for name, operational_intent in intents.items():
+        intent_key = (operational_intent.source.name, operational_intent.destination.name, operational_intent.start)
         print(f"Intent {name}:")
-        operational_intent.solution()
+        
+        # Print greedy solution
+        greedy_sol = greedy_solution.get_solution(intent_key)
+        if greedy_sol and greedy_sol.solution_found:
+            adjusted_start = greedy_sol.adjusted_start if greedy_sol.adjusted_start is not None else operational_intent.start
+            solution_greedy = "".join([f"[node:{link.name}, layer:{link.layer}, "
+                                       f"travel_time:{adjusted_start+link.travel_time}]" +
+                                       (" --> " if index < len(greedy_sol.path) - 1 else "")
+                                       for index, link in enumerate(greedy_sol.path)])
+            print(f"\t{solution_greedy}")
+        else:
+            print(f"\tNo greedy solution is possible for this operational intent.")
+        
+        # Print IP solution
+        ip_sol = ip_solution.get_solution(intent_key)
+        if ip_sol and ip_sol.solution_found:
+            solution_ip = "".join([f"[node:{link.name}, layer:{link.layer}, "
+                                   f"travel_time:{operational_intent.start + link.travel_time}]" +
+                                   (" --> " if index < len(ip_sol.path) - 1 else "")
+                                   for index, link in enumerate(ip_sol.path)])
+            print(f"\t{solution_ip}")
+        else:
+            print(f"\tNo IP solution is possible for this operational intent.")
+        
+        # Print time information
+        greedy_time_diff = greedy_sol.time_difference if greedy_sol else None
+        ip_time_diff = ip_sol.time_difference if ip_sol else None
+        
+        print(f"\tideal time:{greedy_sol.ideal_time if greedy_sol else 'N/A'}, "
+              f"actual greedy time:{greedy_sol.actual_time if greedy_sol else 'N/A'}, "
+              f"actual ip time: {ip_sol.actual_time if ip_sol else 'N/A'}, "
+              f"greedy time difference:{greedy_time_diff if greedy_time_diff is not None else 'N/A'}, "
+              f"ip time difference:{ip_time_diff if ip_time_diff is not None else 'N/A'}\n\n")
 
 
 def adjust_capacities(goal_node: graph.ExtendedNode, nodes_dict: Dict[str, graph.Node]) -> None:
@@ -451,7 +557,7 @@ def adjust_capacities(goal_node: graph.ExtendedNode, nodes_dict: Dict[str, graph
         goal_node = goal_node.previous
 
 
-def increment_reservations(time_uncertainty: int, prev_intent, nodes_dict: dict,  delta: int,
+def increment_reservations(time_uncertainty: int, prev_path: List[utils.Link], nodes_dict: dict,  delta: int,
                            indices: Sequence = None) -> None:
     """
     Increments reservations of the vertiports of a scheduled operational intent
@@ -460,8 +566,8 @@ def increment_reservations(time_uncertainty: int, prev_intent, nodes_dict: dict,
     Args:
         time_uncertainty: int
             Time uncertainty of an operation down in the intents queue.
-        prev_intent: intents.Intent
-            A scheduled operational intent.
+        prev_path: List[utils.Link]
+            Path of a scheduled operational intent.
         nodes_dict: dict
             Dictionary of nodes objects and their names.
         delta: int
@@ -473,39 +579,42 @@ def increment_reservations(time_uncertainty: int, prev_intent, nodes_dict: dict,
 
     """
     decrementor = int(math.copysign(1, time_uncertainty))  # sign of time_uncertainty
-    path = prev_intent.path_greedy
-    indices = indices if indices else range(1, len(path))
+    indices = indices if indices else range(1, len(prev_path))
 
     for index in indices:
-        name = path[index].name
-        prev_name = path[index-1].name
+        name = prev_path[index].name
+        prev_name = prev_path[index-1].name
 
         if name != prev_name:
-            curr_left = path[index].left_reserved_layer
+            curr_left = prev_path[index].left_reserved_layer
             left = math.ceil(decrementor*time_uncertainty/delta)
             new_left_layer = curr_left - left
             l, r = max(1, new_left_layer), curr_left
-            # if previously set let layer, adjust it
-            if prev_intent.path_greedy[index].probably_left_reserved_layer:
-                prev_intent.path_greedy[index].probably_left_reserved_layer += left
+            # if previously set left layer, adjust it
+            if hasattr(prev_path[index], 'probably_left_reserved_layer') and prev_path[index].probably_left_reserved_layer:
+                prev_path[index].probably_left_reserved_layer += left
             else:
-                prev_intent.path_greedy[index].probably_left_reserved_layer = new_left_layer
+                prev_path[index].probably_left_reserved_layer = new_left_layer
             nodes_dict[name].layer_capacities[l:r] = [cap-decrementor for cap in nodes_dict[name].layer_capacities[l:r]]
 
     return None
 
 
-def decrement_reservations(prev_intent: intent.Intent, curr_intent: intent.Intent, nodes_dict: dict, delta: int) \
-        -> None:
+def decrement_reservations(prev_path: List[utils.Link], curr_path: List[utils.Link], 
+                          u_prev: int, u_curr: int, nodes_dict: dict, delta: int) -> None:
     """
     Undoing `increment_reservations(...)` for the vertiports not being common of
     the two intents or that their uncertainty buffers don't intersect.
 
     Args:
-        prev_intent: intent.Intent
-            Previously scheduled intent
-        curr_intent: intent.Intent
-            An intent being scheduled currently.
+        prev_path: List[utils.Link]
+            Path of previously scheduled intent
+        curr_path: List[utils.Link]
+            Path of intent being scheduled currently.
+        u_prev: int
+            Time uncertainty of previous intent.
+        u_curr: int
+            Time uncertainty of current intent.
         nodes_dict: dict
             Dictionary of nodes objects and their names.
         delta: int
@@ -515,29 +624,27 @@ def decrement_reservations(prev_intent: intent.Intent, curr_intent: intent.Inten
     """
     # find common vertiports, based on name as well as time intersection
     common_nodes = []
-    u_prev, u_curr = [prev_intent.time_uncertainty, curr_intent.time_uncertainty]
-    prev_intent_path: List[utils.Link] = prev_intent.path_greedy
-    curr_intent_path: List[utils.Link] = curr_intent.path_greedy
 
     # find if the two intents have a common vertiport and their uncertainty buffers intersect at that vertiport
-    for ind_p, prev_node in enumerate(prev_intent_path[1:]):
-        for ind_c, curr_node in enumerate(curr_intent_path[1:]):
+    for ind_p, prev_node in enumerate(prev_path[1:]):
+        for ind_c, curr_node in enumerate(curr_path[1:]):
             if prev_node.name == curr_node.name:
-                prev_intent_reaches_before = prev_node.right_reserved_layer <= curr_intent_path[ind_c].layer
-                prev_intent_starts_after = prev_intent_path[ind_p].layer >= curr_node.right_reserved_layer
+                prev_intent_reaches_before = prev_node.right_reserved_layer <= curr_path[ind_c].layer
+                prev_intent_starts_after = prev_path[ind_p].layer >= curr_node.right_reserved_layer
                 if not (prev_intent_reaches_before or prev_intent_starts_after):
                     common_nodes.append(prev_node)
                 break
 
-    # for each vertiport in prev_intent_path, if it is not a common vertiport, decrement its cap
-    indices = [i for i in range(1, len(prev_intent_path)) if prev_intent_path[i] not in common_nodes]
-    increment_reservations(-u_curr, prev_intent, nodes_dict, delta, indices)
+    # for each vertiport in prev_path, if it is not a common vertiport, decrement its cap
+    indices = [i for i in range(1, len(prev_path)) if prev_path[i] not in common_nodes]
+    increment_reservations(-u_curr, prev_path, nodes_dict, delta, indices)
 
     return None
 
 
 def uncertainty_reservation_handling(res_type: str, curr_intent_name: str, curr_intent: intent.Intent,
-                                     nodes_dict: dict, intents_dict: dict, time_delta: int) -> None:
+                                     nodes_dict: dict, greedy_solutions: Dict[tuple, solution.IntentSolution],
+                                     greedy_paths: Dict[str, List[utils.Link]], time_delta: int) -> None:
     """
     When planning an intent, previously scheduled intents must be safe from this current intent being delayed,
     hence the vertiports along all the paths of the previous intents are reserved for longer time.
@@ -556,8 +663,10 @@ def uncertainty_reservation_handling(res_type: str, curr_intent_name: str, curr_
             The operational intent
         nodes_dict: dict
             Dictionary of nodes objects and their names.
-        intents_dict: dict
-            Dictionary of intent objects and their names.
+        greedy_solutions: Dict[tuple, solution.IntentSolution]
+            Dictionary of greedy solutions found so far.
+        greedy_paths: Dict[str, List[utils.Link]]
+            Dictionary of paths by intent name.
         time_delta: int
             Time discretization delta
 
@@ -566,14 +675,20 @@ def uncertainty_reservation_handling(res_type: str, curr_intent_name: str, curr_
     """
     curr_u = curr_intent.time_uncertainty
 
-    for prev_intent_name, prev_intent in intents_dict.items():
+    # Process all previously scheduled intents
+    for prev_intent_name, prev_path in greedy_paths.items():
         if prev_intent_name == curr_intent_name:
             break
-        # p_path = prev_intent.path_greedy
+        
         if res_type == 'increment':
-            increment_reservations(curr_u, prev_intent, nodes_dict, time_delta)
-        elif res_type == 'decrement':
-            decrement_reservations(prev_intent, curr_intent, nodes_dict, time_delta)
+            increment_reservations(curr_u, prev_path, nodes_dict, time_delta)
+        elif res_type == 'decrement' and curr_intent_name in greedy_paths:
+            # Get the current intent's path
+            curr_path = greedy_paths[curr_intent_name]
+            # Get previous intent uncertainty from original intent objects 
+            # (this is a simplification - in a full refactor we'd store this in the solution)
+            prev_u = curr_intent.time_uncertainty  # Using curr_intent uncertainty as approximation
+            decrement_reservations(prev_path, curr_path, prev_u, curr_u, nodes_dict, time_delta)
     return None
 
 
@@ -609,7 +724,7 @@ def main(path: str, verbose: bool, intents_lst: List = None, analysis_obj: Resul
     # --- Solve Greedy ---
     greedy_start = time.perf_counter()
     tracemalloc.start()
-    greedy_obj = solve_greedy(intents_dict, time_delta, nodes_dict)
+    greedy_solution = solve_greedy(intents_dict, time_delta, nodes_dict)
     greedy_end = time.perf_counter()
     greedy_runtime = (greedy_end - greedy_start)
     _, greedy_memory = tracemalloc.get_traced_memory()
@@ -618,22 +733,29 @@ def main(path: str, verbose: bool, intents_lst: List = None, analysis_obj: Resul
     # --- Solve IP ---
     ip_start = time.perf_counter()
     tracemalloc.start()
-    ip_obj, ip_model = solve_ip(nodes_dict, edges_dict, intents_dict, time_steps, time_delta)
+    ip_solution, ip_model = solve_ip(nodes_dict, edges_dict, intents_dict, time_steps, time_delta, greedy_solution)
     ip_end = time.perf_counter()
     ip_runtime = (ip_end - ip_start)
     _, ip_memory = tracemalloc.get_traced_memory()
     tracemalloc.stop()
 
     # --- Check correctness of solutions ---
+    greedy_obj = greedy_solution.total_objective
+    ip_obj = ip_solution.total_objective
     print(f"\n\ngreedy={greedy_obj}, ip_obj={ip_obj}\n\n", flush=True)
+    
+    # Update checks to use solution objects
     greedy_valid_solution, ip_valid_solution = (
-        checks.sanity_check(intents_dict, nodes_dict, edges_dict, time_delta, max(GREEDY_TIME_HORIZON_MULTIPLIER, IP_TIME_HORIZON_MULTIPLIER)*time_horizon))
+        checks.sanity_check_with_solutions(intents_dict, nodes_dict, edges_dict, time_delta, 
+                                          max(GREEDY_TIME_HORIZON_MULTIPLIER, IP_TIME_HORIZON_MULTIPLIER)*time_horizon,
+                                          greedy_solution, ip_solution))
     print(f"greedy_valid_solution={greedy_valid_solution}\nip_valid_solution={ip_valid_solution}", flush=True)
 
     if verbose:
-        print_solutions(intents_dict)
+        print_solutions(intents_dict, greedy_solution, ip_solution)
 
-    ideal_times_sum = sum(op_intent.ideal_time for op_intent in intents_dict.values())
+    # Calculate ideal times sum from solutions
+    ideal_times_sum = sum(sol.ideal_time for sol in greedy_solution.solutions.values() if sol.solution_found)
     if ip_obj:
         ip_obj -= ideal_times_sum
         ip_obj = round(ip_obj, 1)

@@ -252,4 +252,162 @@ def sanity_check(intents: dict, nodes: dict, edges: dict, time_delta: int, time_
     return greedy_vs, ip_vs
 
 
+def sanity_check_with_solutions(intents: dict, nodes: dict, edges: dict, time_delta: int, time_horizon: int,
+                               greedy_solution, ip_solution) -> tuple:
+    """
+    Performs sanity check on drone paths found by the methods using solution objects.
+    The checks are both time and capacity related. If any of these checks fails, then
+    False is returned, else True.
+
+    Parameters
+    ----------
+    intents: dict
+        The intents dict.
+    nodes: dict
+        The nodes dict.
+    edges: dict
+        The edges dict.
+    time_delta: int
+        Time discretization delta.
+    time_horizon: int
+        Planning time horizon.
+    greedy_solution: solution.GreedySolution
+        The greedy solution object.
+    ip_solution: solution.IPSolution
+        The IP solution object.
+
+    Returns
+    -------
+        greedy_vs: ValidSolution
+            An instance of ValidSolution.
+        ip_vs: ValidSolution
+           An instance of ValidSolution.
+
+    """
+    greedy_time_correct = True
+    ip_time_correct = True
+
+    greedy_cycles_not_exist = True
+    ip_cycles_not_exist = True
+
+    for intent_key, intent in intents.items():
+        intent_key_tuple = (intent.source.name, intent.destination.name, intent.start)
+        
+        # Get solutions for this intent
+        greedy_sol = greedy_solution.get_solution(intent_key_tuple)
+        ip_sol = ip_solution.get_solution(intent_key_tuple)
+        
+        # Check greedy solution
+        if greedy_sol and greedy_sol.solution_found and len(greedy_sol.path) > 0:
+            greedy_correct = time_correctness(greedy_sol.path, edges, time_delta)
+            greedy_time_correct = greedy_time_correct and greedy_correct
+            
+            greedy_cycle = cycles_exists(greedy_sol.path)
+            greedy_cycles_not_exist = greedy_cycles_not_exist and not greedy_cycle
+        
+        # Check IP solution
+        if ip_sol and ip_sol.solution_found and len(ip_sol.path) > 0:
+            ip_correct = time_correctness(ip_sol.path, edges, time_delta)
+            ip_time_correct = ip_time_correct and ip_correct
+            
+            ip_cycle = cycles_exists(ip_sol.path)
+            ip_cycles_not_exist = ip_cycles_not_exist and not ip_cycle
+
+    # Check capacity correctness using solutions
+    greedy_capacity_correct, ip_capacity_correct = capacity_correctness_with_solutions(
+        intents, nodes, time_delta, time_horizon, greedy_solution, ip_solution)
+
+    greedy_vs = ValidSolution(method='Greedy', time_correct=greedy_time_correct,
+                              capacity_correct=greedy_capacity_correct, cycles=not greedy_cycles_not_exist)
+    ip_vs = ValidSolution(method='IP', time_correct=ip_time_correct,
+                          capacity_correct=ip_capacity_correct, cycles=not ip_cycles_not_exist)
+
+    return greedy_vs, ip_vs
+
+
+def capacity_correctness_with_solutions(intents: dict, nodes: dict, time_delta: int, time_horizon: int,
+                                       greedy_solution, ip_solution) -> tuple:
+    """
+    Checks whether any vertiport is overcapacitated at any point in the time planning
+    using solution objects.
+
+    Parameters
+    ----------
+    intents: dict
+        The intents dict.
+    nodes: dict
+        The nodes dict.
+    time_delta: int
+        Time discretization delta.
+    time_horizon: int
+        Planning time horizon.
+    greedy_solution: solution.GreedySolution
+        The greedy solution object.
+    ip_solution: solution.IPSolution
+        The IP solution object.
+
+    Returns
+    -------
+        greedy_capacity_correct: bool
+            Boolean, whether capacities for greedy are valid.
+        ip_capacity_correct: bool
+            Boolean, whether capacities for ip are valid.
+
+    """
+    n_vertiports, n_layers = len(nodes), time_horizon//time_delta
+
+    reservations_greedy = np.zeros((n_vertiports, n_layers+1))
+    reservations_ip = np.zeros((n_vertiports, n_layers+1))
+
+    names = ['GREEDY', 'INTEGER PROGRAMMING']
+    J = 0
+
+    for idx, intent in enumerate(intents.values()):
+        intent_key = (intent.source.name, intent.destination.name, intent.start)
+        
+        # Get solutions for this intent
+        greedy_sol = greedy_solution.get_solution(intent_key)
+        ip_sol = ip_solution.get_solution(intent_key)
+        
+        path_greedy = greedy_sol.path if greedy_sol and greedy_sol.solution_found else []
+        path_ip = ip_sol.path if ip_sol and ip_sol.solution_found else []
+
+        for path, reservations in zip([path_greedy, path_ip], [reservations_greedy, reservations_ip]):
+            if DEBUG:
+                print(names[J])
+                J = (J+1)%2
+                print(f"{idx}: Drone={intent}", flush=True)
+                print(f"path={path}", flush=True)
+                print(f"{'='*100}")
+            
+            if len(path) == 0:
+                continue
+                
+            for i in range(len(path[:-1])):
+                dep_link, arr_link = path[i], path[i + 1]
+                dep_node, arr_node = dep_link.name, arr_link.name
+
+                left = arr_link.left_reserved_layer
+                right = arr_link.right_reserved_layer
+
+                # no reservation for ground delay
+                if dep_node == arr_node:
+                    left = arr_link.layer
+                    right = arr_link.layer-1
+
+                vertiport_id = int(arr_node[1:])
+
+                # in case left reserved layer is not determined (which can happen for the last intent), set manually
+                if not left and right:
+                    left = dep_link.layer + 1
+
+                reservations[vertiport_id][range(left, right+1)] += 1
+
+    vertiport_capacities = np.expand_dims(np.array([node.capacity for node in nodes.values()]), 1)
+    greedy_capacity_correct = np.all(vertiport_capacities - reservations_greedy >= 0)
+    ip_capacity_correct = np.all(vertiport_capacities - reservations_ip >= 0)
+
+    return greedy_capacity_correct, ip_capacity_correct
+
+
 # =============================================== END OF FILE ===============================================
